@@ -58,6 +58,25 @@ def encoder_available(encoder: str) -> bool:
         return False
 
 
+@lru_cache(maxsize=None)
+def encoder_pix_fmts(encoder: str) -> frozenset[str]:
+    """Pixel formats an encoder accepts. ffmpeg silently downconverts to one of these,
+    so an 8-bit-only libx265 build would quietly turn 10-bit footage into 8-bit."""
+    try:
+        out = subprocess.run([find_tool("ffmpeg"), "-hide_banner", "-h", f"encoder={encoder}"],
+                             capture_output=True, text=True, timeout=20).stdout
+    except (subprocess.TimeoutExpired, OSError):
+        return frozenset()
+    for line in out.splitlines():
+        if "Supported pixel formats" in line:
+            return frozenset(line.split(":", 1)[1].split())
+    return frozenset()
+
+
+def _supports_10bit(encoder: str, pix: str) -> bool:
+    return encoder_available(encoder) and pix in encoder_pix_fmts(encoder)
+
+
 def output_extension(src: Path, mode: Mode) -> str:
     ext = src.suffix.lower()
     if ext in KEEP_EXTENSIONS:
@@ -93,9 +112,17 @@ def video_codec_args(info: MediaInfo, use_gpu: bool, gpu_compatible: bool = Fals
     keep_422 = "422" in info.pix_fmt and not gpu_compatible
     if ten_bit:
         pix = "yuv422p10le" if keep_422 else "yuv420p10le"
-        return ["-c:v", "libx265", "-preset", "medium", "-crf", "16", "-pix_fmt", pix]
+        for enc in ("libx265", "libx264"):        # x264 can do 10-bit too in most builds
+            if _supports_10bit(enc, pix):
+                return ["-c:v", enc, "-preset", "medium", "-crf", "16", "-pix_fmt", pix]
     pix = "yuv422p" if keep_422 else "yuv420p"
-    return ["-c:v", "libx264", "-preset", "medium", "-crf", "16", "-pix_fmt", pix]
+    if encoder_available("libx264"):
+        return ["-c:v", "libx264", "-preset", "medium", "-crf", "16", "-pix_fmt", pix]
+    # Codec-limited ffmpeg builds (e.g. Fedora's ffmpeg-free) lack x264/x265.
+    bitrate = max(8, int(info.width * info.height * info.fps * 0.3 / 1e6))
+    if encoder_available("libopenh264"):
+        return ["-c:v", "libopenh264", "-b:v", f"{bitrate}M", "-pix_fmt", "yuv420p"]
+    return ["-c:v", "mpeg4", "-q:v", "1", "-pix_fmt", "yuv420p"]
 
 
 def build_command(job: Job, settings: ExportSettings, cpu_fallback: bool = False

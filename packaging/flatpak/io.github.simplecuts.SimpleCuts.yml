@@ -1,0 +1,109 @@
+app-id: io.github.simplecuts.SimpleCuts
+runtime: org.gnome.Platform
+runtime-version: "51"
+sdk: org.gnome.Sdk
+command: simple-cuts
+
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  # GPU: VA-API/GL for preview, /dev/nvidia* for NVENC exports
+  - --device=all
+  # Footage lives anywhere: home, camera cards in /media, /run/media, /mnt
+  - --filesystem=host
+  # Read the host's GTK themes so the app looks like the rest of the desktop
+  # (the app adds /run/host/usr/share/themes to its theme search path).
+  - --filesystem=host-os:ro
+  - --filesystem=xdg-config/gtk-3.0:ro
+  - --filesystem=xdg-config/gtk-4.0:ro
+  - --filesystem=xdg-data/themes:ro
+  - --filesystem=~/.themes:ro
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /lib/*.a
+  - /share/ffmpeg
+  - /share/man
+
+modules:
+  - name: nv-codec-headers
+    buildsystem: simple
+    build-commands:
+      - make install PREFIX=/app
+    sources:
+      - type: git
+        url: https://github.com/FFmpeg/nv-codec-headers.git
+        tag: n12.2.72.0
+        commit: 157becbf51c8b813425572b75c06c370bd43d8fd
+
+  - name: x264
+    config-opts:
+      - --enable-static
+      - --disable-cli
+      - --enable-pic
+    sources:
+      - type: git
+        url: https://code.videolan.org/videolan/x264.git
+        commit: b35605ace3ddf7c1a5d67a2eb553f034aef41d55
+
+  - name: x265
+    buildsystem: cmake-ninja
+    subdir: source
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DENABLE_SHARED=OFF
+      - -DENABLE_CLI=OFF
+      - -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+      # 10-bit build: the app only uses x265 for 10-bit sources (8-bit goes to x264).
+      # A default 8-bit build would silently downconvert 10-bit footage.
+      - -DHIGH_BIT_DEPTH=ON
+    sources:
+      - type: archive
+        url: https://bitbucket.org/multicoreware/x265_git/downloads/x265_4.1.tar.gz
+        sha256: a31699c6a89806b74b0151e5e6a7df65de4b49050482fe5ebf8a4379d7af8f29
+      # CMake >= 4 refuses these two OLD policies; NEW behaviour is fine on Linux.
+      - type: shell
+        commands:
+          - sed -i '/cmake_policy(SET CMP0025 OLD)/d; /cmake_policy(SET CMP0054 OLD)/d'
+            source/CMakeLists.txt
+
+  # A private, static ffmpeg CLI for cutting/encoding. Static so it can't clash with
+  # the runtime's own libav* libraries that GStreamer uses for the preview.
+  - name: ffmpeg
+    config-opts:
+      - --disable-shared
+      - --enable-static
+      - --enable-gpl
+      - --enable-version3
+      - --enable-libx264
+      - --enable-libx265
+      - --enable-ffnvcodec
+      - --enable-nvenc
+      - --disable-doc
+      - --disable-ffplay
+      - --disable-debug
+      - --pkg-config-flags=--static
+      - --extra-cflags=-I/app/include
+      - --extra-ldflags=-L/app/lib
+    sources:
+      - type: git
+        url: https://github.com/FFmpeg/FFmpeg.git
+        tag: n7.1.5
+        commit: 3a0867c2bfda4a4d4309ca1a8cbdc6175e67f587
+
+  - name: simple-cuts
+    buildsystem: simple
+    build-commands:
+      - packaging/stage.sh "" /app
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .git
+          - .venv
+          - dist
+          - packaging/flatpak/.flatpak-builder
+          - packaging/flatpak/build

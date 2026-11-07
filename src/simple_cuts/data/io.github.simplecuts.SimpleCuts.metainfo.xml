@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.simplecuts.SimpleCuts</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Simple Cuts</name>
+  <summary>Trim camera footage and strip audio before editing</summary>
+  <description>
+    <p>
+      Open your camera clips, mark the parts you want to keep and export them,
+      optionally without audio, ready to import into your video editor.
+    </p>
+    <ul>
+      <li>Lossless stream-copy export, or frame-accurate re-encoding (NVIDIA GPU or CPU)</li>
+      <li>Any number of segments per clip, optionally joined into one file</li>
+      <li>Batch export of a whole camera card</li>
+      <li>Follows your GTK theme and dark/light preference</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.simplecuts.SimpleCuts.desktop</launchable>
+  <developer id="io.github.simplecuts">
+    <name>Bitangsha Ray</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.2.0" date="2026-11-07"/>
+  </releases>
+</component>

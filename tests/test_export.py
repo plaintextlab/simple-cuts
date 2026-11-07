@@ -162,3 +162,15 @@ def test_gpu_failure_falls_back_to_cpu(clip, tmp_path, monkeypatch):
     [out] = Exporter().run([clip], settings, lambda f, s: progress.append(s))
     assert abs(video_frames(out) - 60) <= 1
     assert any("using CPU" in s for s in progress)
+
+
+def test_ten_bit_never_silently_downconverted(monkeypatch):
+    import simple_cuts.export as ex
+    from simple_cuts.media import MediaInfo
+    info = MediaInfo(Path("x.mov"), 10, 25, 3840, 2160, "hevc", "yuv422p10le", False)
+    # an 8-bit-only libx265 build must not be chosen for 10-bit footage
+    monkeypatch.setattr(ex, "encoder_available", lambda e: e in ("libx265", "libx264"))
+    monkeypatch.setattr(ex, "encoder_pix_fmts", lambda e: frozenset(
+        {"libx265": {"yuv420p", "yuv422p"}, "libx264": {"yuv420p", "yuv422p10le"}}[e]))
+    args = ex.video_codec_args(info, use_gpu=False)
+    assert args[1] == "libx264" and args[-1] == "yuv422p10le"

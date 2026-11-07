@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Simple Cuts
+GenericName=Video Cutter
+Comment=Trim camera footage and strip audio before editing
+Exec=simple-cuts %F
+Icon=io.github.simplecuts.SimpleCuts
+Terminal=false
+Categories=AudioVideo;Video;AudioVideoEditing;
+MimeType=video/mp4;video/quicktime;video/x-matroska;video/mp2t;video/x-msvideo;video/webm;
+Keywords=video;cut;trim;footage;camera;
+StartupWMClass=io.github.simplecuts.SimpleCuts

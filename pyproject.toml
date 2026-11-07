@@ -1,14 +1,13 @@
 [project]
 name = "simple-cuts"
-version = "0.1.0"
+version = "0.2.0"
 description = "Simple video cutter: trim camera footage and strip audio before editing"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.11"
-dependencies = [
-    "PySide6-Essentials>=6.8",
-    "PySide6-Addons>=6.8",
-]
+requires-python = ">=3.9"
+# Runtime deps are system packages (PyGObject, GTK4, GStreamer, ffmpeg):
+# simple-cuts.sh installs them with your distro's package manager.
+dependencies = []
 
 [project.scripts]
 simple-cuts = "simple_cuts.app:main"

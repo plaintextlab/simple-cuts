@@ -1,0 +1,15 @@
+# Maintainer: Bitangsha Ray <plaintextlab@gmail.com>
+# Build from the repo:  cd packaging/arch && makepkg -si
+pkgname=simple-cuts
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Simple video cutter for camera footage"
+arch=('any')
+license=('MIT')
+depends=('python' 'python-gobject' 'gtk4' 'gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'ffmpeg')
+optdepends=('gst-libav: preview H.264/H.265/ProRes footage'
+            'gst-plugins-bad: preview more formats')
+
+package() {
+    "$startdir/../stage.sh" "$pkgdir" /usr
+}
