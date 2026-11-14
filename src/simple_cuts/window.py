@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import threading
+import time
 from pathlib import Path
 
 import gi
@@ -13,6 +15,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
+from . import __version__, updater  # noqa: E402
 from .export import CancelledError, ExportSettings, Exporter, Mode  # noqa: E402
 from .media import Clip, MediaError, format_time, keyframe_times, probe  # noqa: E402
 from .player import Player  # noqa: E402
@@ -127,7 +130,11 @@ class MainWindow(Gtk.ApplicationWindow):
         self.add_controller(drop)
 
         self.connect("close-request", self._on_close_request)
+        self._install_actions()
+        self._update_release: updater.Release | None = None
+        self._update_busy = False
         self._refresh_all()
+        GLib.timeout_add_seconds(3, self._auto_check_updates)
 
     # ---- construction ----------------------------------------------------
     def _build_ui(self) -> None:
@@ -136,6 +143,18 @@ class MainWindow(Gtk.ApplicationWindow):
         header.pack_start(_button("Open folder…", self.open_folder, "Open every video in a "
                                   "folder (e.g. a camera card)"))
         header.pack_start(_button("Remove clip", self.remove_clip))
+        menu = Gio.Menu()
+        updates = Gio.Menu()
+        updates.append("Check for Updates", "win.check-updates")
+        updates.append("Check Automatically", "win.auto-updates")
+        menu.append_section(None, updates)
+        about = Gio.Menu()
+        about.append("About Simple Cuts", "win.about")
+        menu.append_section(None, about)
+        menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
+        menu_btn.set_tooltip_text("Menu")
+        menu_btn.set_focus_on_click(False)
+        header.pack_end(menu_btn)
         self.set_titlebar(header)
 
         # Left: clips
@@ -322,11 +341,34 @@ class MainWindow(Gtk.ApplicationWindow):
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         for side in ("top", "bottom", "start", "end"):
             getattr(root, f"set_margin_{side}")(8)
+        root.append(self._build_update_bar())
         root.append(outer)
         root.append(export_frame)
         root.append(status)
         self.set_child(root)
         self._on_mode_changed()
+
+    def _build_update_bar(self) -> Gtk.Revealer:
+        self.update_label = _label("")
+        self.update_label.set_hexpand(True)
+        self.update_label.set_wrap(True)
+        self.update_notes_btn = _button("What's new", self._open_release_page)
+        self.update_btn = _button("Update now", self._update_action)
+        self.update_btn.add_css_class("suggested-action")
+        self.update_later_btn = _button("Later", lambda: self.update_bar.set_reveal_child(False))
+        box = Gtk.Box(spacing=8)
+        for side in ("top", "bottom", "start", "end"):
+            getattr(box, f"set_margin_{side}")(6)
+        for w in (self.update_label, self.update_notes_btn, self.update_btn,
+                  self.update_later_btn):
+            w.set_valign(Gtk.Align.CENTER)
+            box.append(w)
+        frame = Gtk.Frame()
+        frame.set_child(box)
+        self.update_bar = Gtk.Revealer()
+        self.update_bar.set_child(frame)
+        self.update_bar.set_reveal_child(False)
+        return self.update_bar
 
     def _titled(self, title: str, child: Gtk.Widget) -> Gtk.Box:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -907,6 +949,171 @@ class MainWindow(Gtk.ApplicationWindow):
             self.alert("Export failed", error)
         self._refresh_clip_list()
         return False
+
+    # ---- updates & about -------------------------------------------------
+    def _install_actions(self) -> None:
+        check = Gio.SimpleAction.new("check-updates", None)
+        check.connect("activate", lambda *_: self.check_for_updates(manual=True))
+        self.add_action(check)
+        auto = Gio.SimpleAction.new_stateful(
+            "auto-updates", None, GLib.Variant.new_boolean(bool(self.prefs.get("auto_update", True))))
+        auto.connect("change-state", self._on_auto_updates_toggled)
+        self.add_action(auto)
+        about = Gio.SimpleAction.new("about", None)
+        about.connect("activate", lambda *_: self.show_about())
+        self.add_action(about)
+
+    def _on_auto_updates_toggled(self, action, value) -> None:
+        action.set_state(value)
+        self.prefs["auto_update"] = value.get_boolean()
+        save_prefs(self.prefs)
+
+    def _auto_check_updates(self) -> bool:
+        kind = updater.install_kind()
+        due = time.time() - float(self.prefs.get("last_update_check", 0)) > \
+            updater.CHECK_INTERVAL
+        if kind != "dev" and self.prefs.get("auto_update", True) and due:
+            self.check_for_updates(manual=False)
+        return False
+
+    def check_for_updates(self, manual: bool) -> None:
+        if self._update_busy:
+            return
+        self._update_busy = True
+        if manual:
+            self.flash("Checking for updates…")
+
+        def work():
+            try:
+                rel, err = updater.check_for_update(), None
+            except updater.UpdateError as exc:
+                rel, err = None, str(exc)
+            GLib.idle_add(self._on_update_checked, rel, err, manual)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_update_checked(self, release, error, manual: bool) -> bool:
+        self._update_busy = False
+        if error is None:
+            self.prefs["last_update_check"] = time.time()
+            save_prefs(self.prefs)
+        if error:
+            if manual:
+                self.alert("Couldn't check for updates", error)
+            return False
+        if release is None:
+            if manual:
+                self.flash(f"Simple Cuts {__version__} is the latest version")
+            return False
+        self._update_release = release
+        kind = updater.install_kind()
+        self.update_notes_btn.set_visible(True)
+        self.update_later_btn.set_visible(True)
+        self.update_btn.set_sensitive(True)
+        if updater.can_self_update(kind):
+            self.update_label.set_text(f"Simple Cuts {release.version} is available "
+                                       f"(you have {__version__}).")
+            self.update_btn.set_label("Update now")
+        else:
+            how = {"flatpak": "Download the new Flatpak from the release page.",
+                   "dev": "You're running from a git checkout: update with git pull.",
+                   "system": "Update it with your package manager, or install the new "
+                             "package from the release page.",
+                   "portable": "Download the new simple-cuts.sh from the release page, or "
+                               "run it with --install to get automatic updates."}[kind]
+            self.update_label.set_text(f"Simple Cuts {release.version} is available "
+                                       f"(you have {__version__}). {how}")
+            self.update_btn.set_label("Download")
+        self.update_bar.set_reveal_child(True)
+        return False
+
+    def _open_release_page(self) -> None:
+        url = self._update_release.page_url if self._update_release else updater.RELEASES_URL
+        self._open_uri(url)
+
+    def _open_uri(self, url: str) -> None:
+        if hasattr(Gtk, "UriLauncher"):
+            Gtk.UriLauncher.new(url).launch(self, None, None)
+        else:
+            Gtk.show_uri(self, url, Gdk.CURRENT_TIME)
+
+    def _update_action(self) -> None:
+        if self._update_release is None:
+            return
+        if self.update_btn.get_label() == "Restart now":
+            self._restart()
+            return
+        if not updater.can_self_update():
+            self._open_release_page()
+            return
+        if self._update_busy:
+            return
+        self._update_busy = True
+        self.update_btn.set_sensitive(False)
+        self.update_later_btn.set_visible(False)
+        release = self._update_release
+
+        def work():
+            try:
+                updater.apply_update(release, lambda m: GLib.idle_add(
+                    self.update_label.set_text, m))
+                err = None
+            except (updater.UpdateError, OSError) as exc:
+                err = str(exc)
+            GLib.idle_add(self._on_update_applied, err)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_update_applied(self, error) -> bool:
+        self._update_busy = False
+        self.update_btn.set_sensitive(True)
+        self.update_later_btn.set_visible(True)
+        if error:
+            self.update_label.set_text("The update failed. Your current version still works.")
+            self.update_btn.set_label("Update now")
+            self.alert("Update failed", error)
+            return False
+        self.update_label.set_text(f"Updated to {self._update_release.version}. Restart "
+                                   "Simple Cuts to use it.")
+        self.update_btn.set_label("Restart now")
+        self.update_notes_btn.set_visible(False)
+        return False
+
+    def _restart(self) -> None:
+        pending = [c for c in self.clips if c.segments and c.path not in self.exported]
+
+        def go():
+            launcher = updater.launcher_path()
+            try:
+                subprocess.Popen([str(launcher)], start_new_session=True,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+            except OSError as exc:
+                self.alert("Couldn't restart", f"Start Simple Cuts again yourself.\n{exc}")
+                return
+            self._force_close()
+
+        if self._exporter is not None:
+            self.alert("Export running", "Restart after the export finishes.")
+        elif pending:
+            self.confirm("Restart now?", f"{len(pending)} clip(s) have marked segments that "
+                         "were not exported. They will be lost.", "Restart", go)
+        else:
+            go()
+
+    def show_about(self) -> None:
+        about = Gtk.AboutDialog(transient_for=self, modal=True)
+        about.set_program_name("Simple Cuts")
+        about.set_version(__version__)
+        about.set_comments("Trim camera footage and strip audio before editing.")
+        about.set_logo_icon_name("io.github.simplecuts.SimpleCuts")
+        about.set_website(f"https://github.com/{updater.REPO}")
+        about.set_website_label("Source code and releases")
+        about.set_license_type(Gtk.License.MIT_X11)
+        about.set_authors(["Bitangsha Ray"])
+        kind = {"user": "installed for this user (updates automatically)",
+                "flatpak": "Flatpak", "dev": "git checkout", "system": "system package",
+                "portable": "single-file script"}[updater.install_kind()]
+        about.set_system_information(f"Install type: {kind}")
+        about.present()
 
     # ---- keyboard --------------------------------------------------------
     def _on_key(self, _ctl, keyval, _code, state) -> bool:

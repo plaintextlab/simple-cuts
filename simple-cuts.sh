@@ -4,7 +4,8 @@
 #   ./simple-cuts.sh [files or folders...]   check dependencies, install missing ones, run
 #   ./simple-cuts.sh --check                 only report what is missing
 #   ./simple-cuts.sh --install-deps          only install dependencies
-#   ./simple-cuts.sh --desktop               add Simple Cuts to your application menu
+#   ./simple-cuts.sh --install               install for this user: app menu entry, updates
+#   ./simple-cuts.sh --uninstall             remove that install (keeps your settings)
 #   ./simple-cuts.sh --help
 #
 # Works from a git checkout (runs ./src) or as a single self-contained file built by
@@ -17,7 +18,9 @@
 set -eu
 
 APP="simple-cuts"
-VERSION="0.2.0"
+VERSION="0.3.0"
+# Set by --install (and by the in-app updater) in the installed copy of this script.
+INSTALLED_APP_DIR=""
 
 say()  { printf '\033[1m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
@@ -28,6 +31,9 @@ HERE=$(dirname "$SELF")
 
 # ---------------------------------------------------------------- locate the app
 find_app_dir() {
+    if [ -n "$INSTALLED_APP_DIR" ] && [ -f "$INSTALLED_APP_DIR/simple_cuts/app.py" ]; then
+        echo "$INSTALLED_APP_DIR"; return                 # per-user install (--install)
+    fi
     if [ -f "$HERE/src/simple_cuts/app.py" ]; then        # git checkout / package
         echo "$HERE/src"; return
     fi
@@ -248,21 +254,24 @@ ensure_deps() {
     return 0
 }
 
-# ---------------------------------------------------------------- desktop entry
-install_desktop() {
-    apps="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
-    icons="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
-    mkdir -p "$apps" "$icons"
-    appdir=$(find_app_dir)
-    icon="$appdir/simple_cuts/data/io.github.simplecuts.SimpleCuts.svg"
-    [ -f "$icon" ] && cp "$icon" "$icons/"
-    cat > "$apps/io.github.simplecuts.SimpleCuts.desktop" <<EOF
+# ---------------------------------------------------------------- per-user install
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}"
+INSTALL_DIR="$DATA_DIR/$APP/app"
+BIN="$HOME/.local/bin/$APP"
+DESKTOP="$DATA_DIR/applications/io.github.simplecuts.SimpleCuts.desktop"
+ICON="$DATA_DIR/icons/hicolor/scalable/apps/io.github.simplecuts.SimpleCuts.svg"
+MARKER="Simple Cuts — all-in-one launcher"
+
+write_desktop() {
+    mkdir -p "$(dirname "$DESKTOP")" "$(dirname "$ICON")"
+    cp "$INSTALL_DIR/simple_cuts/data/io.github.simplecuts.SimpleCuts.svg" "$ICON"
+    cat > "$DESKTOP" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Simple Cuts
 GenericName=Video Cutter
 Comment=Trim camera footage and strip audio before editing
-Exec="$SELF" %F
+Exec="$BIN" %F
 Icon=io.github.simplecuts.SimpleCuts
 Terminal=false
 Categories=AudioVideo;Video;AudioVideoEditing;
@@ -270,22 +279,64 @@ MimeType=video/mp4;video/quicktime;video/x-matroska;video/mp2t;video/x-msvideo;v
 Keywords=video;cut;trim;footage;camera;
 StartupWMClass=io.github.simplecuts.SimpleCuts
 EOF
-    command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$apps" 2>/dev/null || true
-    say "Added Simple Cuts to your application menu ($apps)"
+    command -v update-desktop-database >/dev/null 2>&1 \
+        && update-desktop-database "$(dirname "$DESKTOP")" 2>/dev/null
+    return 0
+}
+
+install_user() {
+    src=$(find_app_dir)
+    if [ "$(readlink -f "$src")" != "$(readlink -f "$INSTALL_DIR" 2>/dev/null || echo -)" ]; then
+        rm -rf "$INSTALL_DIR.new"
+        mkdir -p "$INSTALL_DIR.new"
+        cp -R "$src/simple_cuts" "$INSTALL_DIR.new/"
+        find "$INSTALL_DIR.new" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
+        rm -rf "$INSTALL_DIR.old"
+        if [ -d "$INSTALL_DIR" ]; then mv "$INSTALL_DIR" "$INSTALL_DIR.old"; fi
+        mv "$INSTALL_DIR.new" "$INSTALL_DIR"
+        rm -rf "$INSTALL_DIR.old"
+    fi
+    # The installed launcher is this script minus any embedded payload, pointed at INSTALL_DIR.
+    mkdir -p "$(dirname "$BIN")"
+    sed -e '/^__PAYLOAD__$/,$d' \
+        -e "s|^INSTALLED_APP_DIR=\".*\"\$|INSTALLED_APP_DIR=\"$INSTALL_DIR\"|" \
+        "$SELF" > "$BIN.tmp"
+    chmod 755 "$BIN.tmp"
+    mv "$BIN.tmp" "$BIN"
+    write_desktop
+    say "Installed Simple Cuts $VERSION — it is in your application menu"
+    say "App: $INSTALL_DIR   Launcher: $BIN"
+    case ":$PATH:" in
+        *":$HOME/.local/bin:"*) ;;
+        *) say "Tip: add ~/.local/bin to your PATH to run 'simple-cuts' from a terminal" ;;
+    esac
+}
+
+uninstall_user() {
+    rm -rf "$INSTALL_DIR" "$INSTALL_DIR.new" "$INSTALL_DIR.old" \
+        "${XDG_CACHE_HOME:-$HOME/.cache}/$APP"
+    rmdir "$DATA_DIR/$APP" 2>/dev/null || true
+    if [ -f "$BIN" ] && grep -q "$MARKER" "$BIN"; then rm -f "$BIN"; fi
+    rm -f "$DESKTOP" "$ICON"
+    command -v update-desktop-database >/dev/null 2>&1 \
+        && update-desktop-database "$(dirname "$DESKTOP")" 2>/dev/null
+    say "Removed Simple Cuts (settings in ${XDG_CONFIG_HOME:-$HOME/.config}/$APP were kept)"
 }
 
 # ---------------------------------------------------------------- main
 case "${1:-}" in
     -h|--help)
-        sed -n '2,15p' "$SELF" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        sed -n '2,17p' "$SELF" | sed 's/^# \{0,1\}//'; exit 0 ;;
     --check)
         missing=$(check_deps)
         if [ -z "$missing" ]; then say "All dependencies are installed"; exit 0; fi
         echo "$missing" | sed 's/^hard:/missing:  /; s/^soft:/optional: /'; exit 1 ;;
     --install-deps)
         ensure_deps; say "Dependencies are installed"; exit 0 ;;
-    --desktop)
-        ensure_deps; install_desktop; exit 0 ;;
+    --install|--desktop)
+        ensure_deps; install_user; exit 0 ;;
+    --uninstall)
+        uninstall_user; exit 0 ;;
     --version)
         echo "$APP $VERSION"; exit 0 ;;
 esac

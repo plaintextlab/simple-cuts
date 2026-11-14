@@ -6,15 +6,23 @@ Open your camera clips, mark the parts you want to keep, and export them,
 with the audio stripped (optional), ready to import into your real editor.
 A native GTK 4 app that uses your desktop's GTK theme and follows dark/light mode.
 
-## Run it
-
-### One file, any distro
+## Install
 
 ```bash
-./simple-cuts.sh
+./simple-cuts.sh --install
 ```
 
-That's all. The script checks what's missing, installs it with your distro's
+That installs Simple Cuts for your user (no root needed for the app itself) and adds it to
+your application menu. It updates itself: about once a day it checks this repository's
+[GitHub Releases](https://github.com/plaintextlab/simple-cuts/releases) and offers
+**Update now** when there's a newer version (turn this off in the ⋮ menu, or use
+**Check for Updates** there). `./simple-cuts.sh --uninstall` removes it again; your
+settings are kept.
+
+You can also download `simple-cuts-VERSION.sh` from a release and run
+`sh simple-cuts-VERSION.sh --install`: that one file contains the whole app.
+
+To just run it without installing: `./simple-cuts.sh`. The script checks what's missing, installs it with your distro's
 package manager (it asks for your password via sudo/doas/pkexec/su), and starts the app.
 Supported: Debian/Ubuntu/Mint/Pop!_OS (apt), Fedora/RHEL (dnf), openSUSE (zypper),
 Arch/Manjaro/EndeavourOS (pacman), Void (xbps), Alpine (apk), Gentoo (emerge).
@@ -31,12 +39,19 @@ frame-accurate export, the single-file build, and the .deb/.rpm/PKGBUILD package
 | Option | |
 |---|---|
 | `./simple-cuts.sh clip.mp4 /media/card` | open files/folders straight away |
-| `./simple-cuts.sh --desktop` | add Simple Cuts to your application menu |
+| `./simple-cuts.sh --install` | install for this user, with menu entry and updates |
+| `./simple-cuts.sh --uninstall` | remove that install (keeps settings) |
 | `./simple-cuts.sh --check` | only report missing dependencies |
 | `./simple-cuts.sh --install-deps` | only install dependencies |
 
 `packaging/build-run.sh` produces `dist/simple-cuts-VERSION.sh`, a **single
 self-contained file** with the app embedded: copy it to any machine and run it.
+
+### Updates for other install types
+
+Copies installed by a package manager, the Flatpak and the single-file script aren't
+replaced by the app; they show the new version with a link to the release page, so you
+update them the way you installed them. A git checkout never checks automatically.
 
 ### Packages
 
@@ -123,7 +138,15 @@ uv run pytest
 | `timeline.py` | timeline widget (cairo) |
 | `theme.py` | dark/light + GTK theme following |
 | `window.py`, `app.py` | GTK window and application |
-| `simple-cuts.sh` | all-in-one launcher / dependency installer |
-| `packaging/` | Flatpak, deb, rpm, PKGBUILD, single-file builder |
+| `updater.py` | GitHub Releases check and per-user self-update (fully tested) |
+| `simple-cuts.sh` | all-in-one launcher, dependency installer, per-user installer |
+| `packaging/` | Flatpak, deb, rpm, PKGBUILD, single-file builder, `release.sh` |
+
+### Releasing
+
+Bump `__version__` in `src/simple_cuts/__init__.py` (a test checks that the launcher,
+`pyproject.toml`, PKGBUILD, spec and metainfo agree), commit, then run
+`packaging/release.sh`. It runs the tests, builds every package, tags `vX.Y.Z`, pushes,
+and creates the GitHub release that installed copies update from.
 
 Windows / macOS support is planned; the code avoids Linux-specific APIs where it can.
