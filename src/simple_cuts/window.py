@@ -16,7 +16,8 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import __version__, updater  # noqa: E402
-from .export import CancelledError, ExportSettings, Exporter, Mode  # noqa: E402
+from .export import (CancelledError, ExportSettings, Exporter, Mode,  # noqa: E402
+                     lossless_extra, lossless_ranges)
 from .media import Clip, MediaError, format_time, keyframe_times, probe  # noqa: E402
 from .player import Player  # noqa: E402
 from .timeline import Timeline  # noqa: E402
@@ -37,6 +38,8 @@ CSS = b"""
 .seg-header { font-weight: bold; }
 button.compact { padding-left: 6px; padding-right: 6px; min-width: 0; }
 """
+
+LOSSLESS_WARN_SECONDS = 2.0      # warn when a lossless cut starts this much too early
 
 _KF_SLOTS = threading.Semaphore(2)    # at most 2 keyframe scans at once
 
@@ -450,6 +453,37 @@ class MainWindow(Gtk.ApplicationWindow):
                 d.destroy()
                 if r == Gtk.ResponseType.OK:
                     on_yes()
+            dlg.connect("response", resp)
+            dlg.present()
+
+    def choose(self, title: str, detail: str, buttons: list[str], on_choice) -> None:
+        """Ask with several buttons; index 0 is Cancel. Calls on_choice(index) otherwise."""
+        if hasattr(Gtk, "AlertDialog"):
+            dlg = Gtk.AlertDialog()
+            dlg.set_message(title)
+            dlg.set_detail(detail)
+            dlg.set_buttons(buttons)
+            dlg.set_cancel_button(0)
+            dlg.set_default_button(len(buttons) - 1)
+
+            def done(d, res):
+                try:
+                    idx = d.choose_finish(res)
+                except GLib.Error:
+                    return
+                if idx > 0:
+                    on_choice(idx)
+            dlg.choose(self, None, done)
+        else:
+            dlg = Gtk.MessageDialog(transient_for=self, modal=True, text=title,
+                                    secondary_text=detail)
+            for i, label in enumerate(buttons):
+                dlg.add_button(label, i)
+
+            def resp(d, r):
+                d.destroy()
+                if isinstance(r, int) and r > 0:
+                    on_choice(r)
             dlg.connect("response", resp)
             dlg.present()
 
@@ -879,6 +913,39 @@ class MainWindow(Gtk.ApplicationWindow):
         """Export every clip that has segments."""
         self._start_export([c for c in self.clips if c.segments])
 
+    def _warn_lossless(self, clips: list[Clip]) -> bool:
+        """Lossless cuts start on the previous keyframe. If that adds a lot of footage
+        (sparse keyframes, common in screen recordings), say so before exporting.
+        Returns True when a question is shown (the export continues from its answer)."""
+        worst, worst_clip = 0.0, None
+        for c in clips:
+            if c.keyframes is None:          # still scanning: plan_jobs handles it
+                continue
+            extra = lossless_extra(c)
+            if extra > worst:
+                worst, worst_clip = extra, c
+        if worst <= LOSSLESS_WARN_SECONDS or worst_clip is None:
+            return False
+        gap = worst_clip.info.duration / max(1, len(worst_clip.keyframes or [1]))
+        overlap = self.join_check.get_active() and any(
+            len(lossless_ranges(c, merge=True)) < len(c.segments)
+            for c in clips if c.keyframes is not None)
+        detail = (f"Lossless cuts can only start on a keyframe. In {worst_clip.path.name} "
+                  f"keyframes are about {gap:.1f} s apart, so a segment will start up to "
+                  f"{worst:.1f} s before your in-point.")
+        if overlap:
+            detail += (" Some segments then overlap, and joining merges them into one, so "
+                       "the joined file can look almost like the original.")
+        detail += " Frame-accurate export cuts exactly where you marked."
+
+        def answer(idx: int) -> None:
+            if idx == 2:
+                self.mode_drop.set_selected(1)          # switch to frame-accurate
+            self._start_export(clips, checked=True)
+        self.choose("Lossless cuts will start early", detail,
+                    ["Cancel", "Export lossless", "Use frame-accurate"], answer)
+        return True
+
     def export_current(self) -> None:
         """Export only the clip shown in the timeline, with all its segments."""
         if self.current is None:
@@ -886,7 +953,7 @@ class MainWindow(Gtk.ApplicationWindow):
             return
         self._start_export([self.current] if self.current.segments else [])
 
-    def _start_export(self, clips: list[Clip]) -> None:
+    def _start_export(self, clips: list[Clip], checked: bool = False) -> None:
         if self._exporter is not None:
             return
         if not clips:
@@ -895,6 +962,8 @@ class MainWindow(Gtk.ApplicationWindow):
         out_text = self.out_entry.get_text().strip()
         if not out_text:
             self.alert("Choose an output folder first")
+            return
+        if not checked and self._mode() is Mode.LOSSLESS and self._warn_lossless(clips):
             return
         settings = ExportSettings(output_dir=Path(out_text).expanduser(), mode=self._mode(),
                                   remove_audio=self.audio_check.get_active(),

@@ -79,6 +79,9 @@ them. The launcher script and the Flatpak each handle one of those cases properl
   - **Lossless** (default): stream copy, no quality loss, takes seconds. Each segment
     starts on the keyframe at or before your in-point (shown hatched on the timeline)
     and may run a few frames past the out-point. It never cuts footage short.
+    Screen recordings often have keyframes many seconds apart; if a cut would start more
+    than 2 s early, the app warns you first and offers frame-accurate instead. When
+    joining, ranges that overlap after snapping are merged, so no footage repeats.
   - **Frame-accurate**: re-encodes at near-lossless quality (CRF/CQ 16) so cuts land on
     the exact frame. Uses the NVIDIA GPU (NVENC) when available, otherwise the CPU
     (x264/x265), and falls back to the CPU automatically if the GPU is busy or out of

@@ -156,6 +156,28 @@ def build_command(job: Job, settings: ExportSettings, cpu_fallback: bool = False
     return cmd
 
 
+def lossless_ranges(clip: Clip, merge: bool) -> list[tuple[float, float]]:
+    """Where stream-copied segments really start and end (start snapped back to the
+    previous keyframe). With ``merge``, ranges that overlap after snapping are merged,
+    so a joined file never repeats footage."""
+    ranges = sorted((snap_to_keyframe(clip.keyframes, s.start), s.end) for s in clip.segments)
+    if not merge:
+        return ranges
+    merged: list[tuple[float, float]] = []
+    for start, end in ranges:
+        if merged and start <= merged[-1][1] + 1e-3:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def lossless_extra(clip: Clip) -> float:
+    """Most footage (seconds) a lossless cut adds before any in-point of this clip."""
+    return max((s.start - snap_to_keyframe(clip.keyframes, s.start) for s in clip.segments),
+               default=0.0)
+
+
 def plan_jobs(clips: list[Clip], settings: ExportSettings
               ) -> list[tuple[Clip, list[Job], Path | None]]:
     """For each clip: its jobs, plus the joined output path (or None)."""
@@ -171,16 +193,17 @@ def plan_jobs(clips: list[Clip], settings: ExportSettings
             clip.keyframes = keyframe_times(clip.path, clip.info.start_time)
         tmp_dir = Path(tempfile.mkdtemp(prefix=".simplecuts-", dir=settings.output_dir)) \
             if join else None
+        if settings.mode is Mode.LOSSLESS:
+            ranges = lossless_ranges(clip, merge=join)
+        else:
+            ranges = sorted((s.start, s.end) for s in clip.segments)
         jobs = []
-        for i, seg in enumerate(clip.segments, 1):
-            start = seg.start
-            if settings.mode is Mode.LOSSLESS:
-                start = snap_to_keyframe(clip.keyframes, seg.start)
+        for i, (start, end) in enumerate(ranges, 1):
             if tmp_dir is not None:
                 out = tmp_dir / f"part{i:02d}{ext}"
             else:
                 out = unique_path(settings.output_dir / f"{stem}_seg{i:02d}{ext}", reserved)
-            jobs.append(Job(clip.path, clip.info, start, seg.end, out))
+            jobs.append(Job(clip.path, clip.info, start, end, out))
         joined = None
         if join:
             joined = unique_path(settings.output_dir / f"{stem}_cut{ext}", reserved)

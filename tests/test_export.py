@@ -174,3 +174,25 @@ def test_ten_bit_never_silently_downconverted(monkeypatch):
         {"libx265": {"yuv420p", "yuv422p"}, "libx264": {"yuv420p", "yuv422p10le"}}[e]))
     args = ex.video_codec_args(info, use_gpu=False)
     assert args[1] == "libx264" and args[-1] == "yuv422p10le"
+
+
+def test_lossless_join_never_repeats_footage(clip, tmp_path):
+    """Sparse keyframes make snapped segments overlap; joining must merge them."""
+    clip.keyframes = [0.0, 5.0]                 # pretend keyframes are 5 s apart
+    clip.add_segment(1.0, 2.0)                  # snaps to 0.0-2.0
+    clip.add_segment(3.0, 4.0)                  # snaps to 0.0-4.0  (overlaps)
+    clip.add_segment(6.0, 7.0)                  # snaps to 5.0-7.0
+    from simple_cuts.export import lossless_extra, lossless_ranges
+    assert lossless_ranges(clip, merge=True) == [(0.0, 4.0), (5.0, 7.0)]
+    assert lossless_extra(clip) == pytest.approx(3.0)
+    [out] = run(clip, tmp_path, join_segments=True)
+    # 4 s + 2 s = 180 frames (+ a few B-frame tail frames), not 0-2 + 0-4 + 5-7 = 240
+    assert 180 <= video_frames(out) <= 190
+
+
+def test_separate_lossless_files_are_not_merged(clip, tmp_path):
+    clip.keyframes = [0.0, 5.0]
+    clip.add_segment(1.0, 2.0)
+    clip.add_segment(3.0, 4.0)
+    outs = run(clip, tmp_path)
+    assert len(outs) == 2
