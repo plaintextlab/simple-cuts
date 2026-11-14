@@ -69,7 +69,8 @@ them. The launcher script and the Flatpak each handle one of those cases properl
     (x264/x265), and falls back to the CPU automatically if the GPU is busy or out of
     memory (e.g. while DaVinci Resolve is open). 10-bit sources stay 10-bit (HEVC).
 - Remove audio (on by default), optionally join a clip's segments into one file
-- Batch export of all clips with progress and cancel
+- **Export current** exports just the clip in the timeline with all its segments;
+  **Export all** exports every clip that has segments. Both show progress and can be cancelled
 - Keeps the original container (`.MP4` → `.mp4`, `.MOV` → `.mov`, …)
 - Never overwrites: outputs are named `C0001_seg01.mp4` (or `C0001_cut.mp4` when
   joined) and get a `_1`, `_2`… suffix if the name already exists
@@ -101,7 +102,8 @@ XSettings, `GTK_THEME`), the app
 | PgUp / PgDn | Previous / next clip |
 | M | Mute preview |
 | Ctrl + O | Open files |
-| Ctrl + E | Export all |
+| Ctrl + E | Export all clips |
+| Ctrl + Shift + E | Export the current clip |
 
 ## Development
 

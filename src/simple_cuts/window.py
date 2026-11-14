@@ -22,7 +22,7 @@ VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".mkv", ".mts", ".m2ts", ".ts", ".mxf", ".
               ".webm", ".3gp", ".insv", ".lrv"}
 
 HELP_TEXT = ("Space play/pause · J/K/L back/pause/forward · ←/→ frame · Shift+←/→ 1 s · "
-             "I in · O out · Esc clear in · Del delete segment · PgUp/PgDn clip · Ctrl+E export")
+             "I in · O out · Esc clear in · Del delete segment · PgUp/PgDn clip · Ctrl+E export all · Ctrl+Shift+E export current")
 
 MODES = [(Mode.LOSSLESS, "Lossless (fast, starts on keyframe)"),
          (Mode.ACCURATE, "Frame-accurate (re-encode)")]
@@ -289,12 +289,15 @@ class MainWindow(Gtk.ApplicationWindow):
         self.progress_label = _label("")
         self.cancel_btn = _button("Cancel", self.cancel_export)
         self.cancel_btn.set_sensitive(False)
-        self.export_btn = _button("Export all", self.export, "Ctrl+E")
+        self.export_current_btn = _button("Export current", self.export_current,
+                                          "Export only the clip in the timeline (Ctrl+Shift+E)")
+        self.export_btn = _button("Export all", self.export, "Export every clip (Ctrl+E)")
         self.export_btn.add_css_class("suggested-action")
         row2 = Gtk.Box(spacing=8)
         row2.append(self.progress)
         row2.append(self.progress_label)
         row2.append(self.cancel_btn)
+        row2.append(self.export_current_btn)
         row2.append(self.export_btn)
         self.progress_label.set_ellipsize(3)
         self.progress_label.set_max_width_chars(28)
@@ -772,6 +775,10 @@ class MainWindow(Gtk.ApplicationWindow):
         total = sum(len(c.segments) for c in self.clips)
         self.export_btn.set_label(f"Export all ({total})" if total else "Export all")
         self.export_btn.set_sensitive(total > 0 and self._exporter is None)
+        n_cur = len(self.current.segments) if self.current else 0
+        self.export_current_btn.set_label(f"Export current ({n_cur})" if n_cur
+                                          else "Export current")
+        self.export_current_btn.set_sensitive(n_cur > 0 and self._exporter is None)
 
     def _update_info(self) -> None:
         c = self.current
@@ -827,9 +834,19 @@ class MainWindow(Gtk.ApplicationWindow):
         save_prefs(self.prefs)
 
     def export(self) -> None:
+        """Export every clip that has segments."""
+        self._start_export([c for c in self.clips if c.segments])
+
+    def export_current(self) -> None:
+        """Export only the clip shown in the timeline, with all its segments."""
+        if self.current is None:
+            self.alert("No clip selected", "Open a clip and mark segments with I and O first.")
+            return
+        self._start_export([self.current] if self.current.segments else [])
+
+    def _start_export(self, clips: list[Clip]) -> None:
         if self._exporter is not None:
             return
-        clips = [c for c in self.clips if c.segments]
         if not clips:
             self.alert("Nothing to export", "Mark at least one segment with I and O first.")
             return
@@ -904,7 +921,8 @@ class MainWindow(Gtk.ApplicationWindow):
         k = Gdk.keyval_to_lower(keyval)
         K = Gdk
         if ctrl:
-            actions = {K.KEY_o: self.open_files, K.KEY_e: self.export, K.KEY_q: self.close,
+            export = self.export_current if shift else self.export
+            actions = {K.KEY_o: self.open_files, K.KEY_e: export, K.KEY_q: self.close,
                        K.KEY_Left: lambda: self.nudge(-10), K.KEY_Right: lambda: self.nudge(10)}
         else:
             actions = {
