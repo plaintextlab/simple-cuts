@@ -20,7 +20,7 @@ fi
 grep -q "^VERSION=\"$V\"" simple-cuts.sh || { echo "simple-cuts.sh VERSION != $V" >&2; exit 1; }
 
 echo "==> Testing"
-if command -v uv >/dev/null 2>&1; then uv run pytest -q; else python3 -m pytest -q; fi
+if command -v uv >/dev/null 2>&1; then uv run --frozen pytest -q; else python3 -m pytest -q; fi
 
 echo "==> Building $V"
 rm -f dist/simple-cuts*
