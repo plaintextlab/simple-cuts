@@ -8,6 +8,8 @@ A native GTK 4 app that uses your desktop's GTK theme and follows dark/light mod
 
 ## Install
 
+On Linux:
+
 ```bash
 ./simple-cuts.sh --install
 ```
@@ -18,6 +20,22 @@ your application menu. It updates itself: about once a day it checks this reposi
 **Update now** when there's a newer version (turn this off in the ⋮ menu, or use
 **Check for Updates** there). `./simple-cuts.sh --uninstall` removes it again; your
 settings are kept.
+
+### macOS
+
+Download `simple-cuts-VERSION-macos-arm64.dmg` (Apple Silicon) from the
+[latest release](https://github.com/plaintextlab/simple-cuts/releases), open it and drag
+**Simple Cuts** into **Applications**. The app contains everything it needs (Python,
+GTK 4, GStreamer, ffmpeg), so you don't need Homebrew. It isn't signed with an Apple
+Developer ID, so macOS blocks the first launch: open it once, then go to **System
+Settings → Privacy & Security** and click **Open Anyway**. It tells you
+when a new version is out; update by installing the new .dmg the same way.
+
+To build it yourself: `packaging/macos/build-app.sh` gives `dist/Simple Cuts.app` and the
+.dmg, for the architecture of the Mac you build on (the first build downloads ~300 MB of
+conda-forge packages into `build/macos`).
+
+### Other ways to run it on Linux
 
 You can also download `simple-cuts-VERSION.sh` from a release and run
 `sh simple-cuts-VERSION.sh --install`: that one file contains the whole app.
@@ -61,6 +79,7 @@ update them the way you installed them. A git checkout never checks automaticall
 | .deb (Debian, Ubuntu, …) | `packaging/deb/build-deb.sh` | `sudo apt install ./dist/simple-cuts_*_all.deb` |
 | .rpm (Fedora, RHEL) | `packaging/rpm/build-rpm.sh` | `sudo dnf install ./dist/simple-cuts-*.noarch.rpm` |
 | Arch (PKGBUILD) | `cd packaging/arch && makepkg -si` | (installs) |
+| macOS .app / .dmg | `packaging/macos/build-app.sh` | drag to Applications |
 
 The Flatpak bundles its own ffmpeg (with x264, x265 and NVENC) on the GNOME runtime, so it
 also covers immutable systems (Silverblue, Kinoite, SteamOS, Bazzite). It reads your
@@ -83,7 +102,8 @@ them. The launcher script and the Flatpak each handle one of those cases properl
     than 2 s early, the app warns you first and offers frame-accurate instead. When
     joining, ranges that overlap after snapping are merged, so no footage repeats.
   - **Frame-accurate**: re-encodes at near-lossless quality (CRF/CQ 16) so cuts land on
-    the exact frame. Uses the NVIDIA GPU (NVENC) when available, otherwise the CPU
+    the exact frame. Uses the NVIDIA GPU (NVENC) when available (VideoToolbox on a
+    Mac), otherwise the CPU
     (x264/x265), and falls back to the CPU automatically if the GPU is busy or out of
     memory (e.g. while DaVinci Resolve is open). 10-bit sources stay 10-bit (HEVC).
 - Remove audio (on by default), optionally join a clip's segments into one file
@@ -104,6 +124,8 @@ XSettings, `GTK_THEME`), the app
   (lxappearance / nwg-look on i3, sway, Openbox, …).
 
 ## Keyboard shortcuts
+
+On macOS, use ⌘ wherever the table says Ctrl.
 
 | Key | Action |
 |---|---|
@@ -143,13 +165,15 @@ uv run pytest
 | `window.py`, `app.py` | GTK window and application |
 | `updater.py` | GitHub Releases check and per-user self-update (fully tested) |
 | `simple-cuts.sh` | all-in-one launcher, dependency installer, per-user installer |
-| `packaging/` | Flatpak, deb, rpm, PKGBUILD, single-file builder, `release.sh` |
+| `packaging/` | Flatpak, deb, rpm, PKGBUILD, macOS app, single-file builder, `release.sh` |
 
 ### Releasing
 
 Bump `__version__` in `src/simple_cuts/__init__.py` (a test checks that the launcher,
 `pyproject.toml`, PKGBUILD, spec and metainfo agree), commit, then run
 `packaging/release.sh`. It runs the tests, builds every package, tags `vX.Y.Z`, pushes,
-and creates the GitHub release that installed copies update from.
+and creates the GitHub release that installed copies update from. Then, on a Mac, check
+out the new tag and run `packaging/release.sh --mac` to build the .dmg and add it to that
+release.
 
-Windows / macOS support is planned; the code avoids Linux-specific APIs where it can.
+Windows support is planned; the code avoids Linux-specific APIs where it can.

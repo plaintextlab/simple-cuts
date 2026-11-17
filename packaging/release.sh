@@ -4,6 +4,8 @@
 #
 #   packaging/release.sh             build, tag, push and create the release
 #   packaging/release.sh --no-flatpak  skip the (slow) Flatpak bundle
+#   packaging/release.sh --mac       on a Mac, after the release exists: build the .dmg
+#                                    and add it to that release (once per architecture)
 #
 # Needs: a clean git tree on main, the GitHub CLI (gh) logged in.
 set -eu
@@ -11,6 +13,19 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 V=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/simple_cuts/__init__.py)
 TAG="v$V"
+
+if [ "${1:-}" = "--mac" ]; then
+    [ "$(uname)" = Darwin ] || { echo "--mac must run on macOS" >&2; exit 1; }
+    git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || git fetch -q origin tag "$TAG" ||
+        { echo "release $TAG doesn't exist yet: run packaging/release.sh on Linux first" >&2; exit 1; }
+    [ "$(git rev-parse HEAD)" = "$(git rev-parse "$TAG^{commit}")" ] ||
+        { echo "check out $TAG first (git checkout $TAG)" >&2; exit 1; }
+    echo "==> Building the macOS app for $TAG"
+    packaging/macos/build-app.sh
+    gh release upload "$TAG" --clobber "dist/simple-cuts-$V-macos-$(uname -m).dmg"
+    echo "==> Added the .dmg to $(gh release view "$TAG" --json url -q .url)"
+    exit 0
+fi
 
 [ -z "$(git status --porcelain)" ] || { echo "commit your changes first" >&2; exit 1; }
 [ "$(git rev-parse --abbrev-ref HEAD)" = main ] || { echo "release from main" >&2; exit 1; }
