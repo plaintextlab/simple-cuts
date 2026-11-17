@@ -1,0 +1,64 @@
+# Builds the macOS app (.dmg) and attaches it to a GitHub release.
+#
+# Runs by itself when a release is published (packaging/release.sh on Linux does that).
+# To add a .dmg to an existing release, run it from the Actions tab
+# ("Run workflow") and enter the tag, e.g. v0.3.2.
+name: macOS dmg
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and attach the .dmg to (e.g. v0.3.2)"
+        required: true
+
+permissions:
+  contents: write          # upload release assets
+
+concurrency:
+  group: macos-dmg-${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  dmg:
+    runs-on: macos-15      # Apple Silicon (arm64)
+    timeout-minutes: 45
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.TAG }}
+
+      - name: Check the tag supports macOS
+        run: |
+          if [ ! -x packaging/macos/build-app.sh ]; then
+            echo "::error::$TAG predates the macOS build (no packaging/macos/build-app.sh)"
+            exit 1
+          fi
+
+      - name: Build Simple Cuts.app and the .dmg
+        run: packaging/macos/build-app.sh
+
+      - name: Smoke-test the bundle
+        run: |
+          C="dist/Simple Cuts.app/Contents"
+          sed 's|^exec .*|exec "$C/MacOS/python3" "$@"|' "$C/MacOS/simple-cuts" > probe.sh
+          cp probe.sh "$C/MacOS/probe" && chmod +x "$C/MacOS/probe"
+          "$C/MacOS/probe" -c '
+          import gi
+          gi.require_version("Gtk", "4.0"); gi.require_version("Gst", "1.0")
+          from gi.repository import Gst, Gtk
+          Gst.init(None)
+          for e in ("playbin", "appsink", "avdec_h264", "avdec_h265", "qtdemux"):
+              assert Gst.ElementFactory.find(e), e
+          from simple_cuts import export, media
+          assert export.encoder_available("libx264")
+          print("ok:", media.find_tool("ffmpeg"))
+          '
+          rm "$C/MacOS/probe" probe.sh
+
+      - name: Attach the .dmg to the release
+        run: gh release upload "$TAG" --clobber dist/simple-cuts-*-macos-*.dmg
