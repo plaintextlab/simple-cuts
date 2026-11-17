@@ -170,11 +170,11 @@ uv run pytest
 ### Releasing
 
 Bump `__version__` in `src/simple_cuts/__init__.py` (a test checks that the launcher,
-`pyproject.toml`, PKGBUILD, spec and metainfo agree), commit, then run
-`packaging/release.sh`. It runs the tests, builds every package, tags `vX.Y.Z`, pushes,
-and creates the GitHub release that installed copies update from. Publishing the release
-starts the **macOS dmg** GitHub Actions workflow, which builds the .dmg on a Mac runner and
-attaches it to the release a few minutes later. To add it to an existing release, run that
-workflow from the Actions tab with the tag, or run `packaging/release.sh --mac` on a Mac.
+`pyproject.toml`, PKGBUILD, spec and metainfo agree), commit, push, then run
+`packaging/release.sh` (on Linux or macOS). It runs the tests if pytest is available,
+then tags `vX.Y.Z` and pushes the tag. GitHub Actions does the rest: it tests again, builds
+the .sh, .deb and .rpm, and publishes the GitHub release that installed copies update
+from. The Flatpak and the macOS .dmg are attached a few minutes later. To add a .dmg to
+an older release, run the **macOS dmg** workflow from the Actions tab with its tag.
 
 Windows support is planned; the code avoids Linux-specific APIs where it can.

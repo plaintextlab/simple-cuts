@@ -1,0 +1,98 @@
+# Publishes a GitHub release when a version tag (vX.Y.Z) is pushed.
+# packaging/release.sh creates and pushes that tag.
+#
+#   build    tests, then the single-file .sh, .deb and .rpm
+#   publish  creates the release with those files (installed copies update from it)
+#   flatpak  builds the Flatpak bundle and attaches it          (after publish)
+#   macos    builds the macOS .dmg and attaches it              (after publish)
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+
+env:
+  TAG: ${{ github.ref_name }}
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the version
+        run: |
+          V=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/simple_cuts/__init__.py)
+          if [ "$TAG" != "v$V" ]; then
+            echo "::error::tag $TAG doesn't match __version__ $V"; exit 1
+          fi
+
+      - name: Install build and test tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends ffmpeg python3-pytest rpm
+
+      - name: Test
+        run: PYTHONPATH=src python3 -m pytest -q
+
+      - name: Build .sh, .deb and .rpm
+        run: |
+          packaging/build-run.sh
+          packaging/deb/build-deb.sh
+          packaging/rpm/build-rpm.sh
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-packages
+          path: dist
+
+      - name: Create the release
+        run: |
+          gh release create "$TAG" --verify-tag --title "Simple Cuts ${TAG#v}" \
+              --generate-notes dist/*
+
+  flatpak:
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Flatpak tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q flatpak flatpak-builder
+
+      - name: Build the Flatpak bundle
+        env:
+          FLATPAK_BUILDER_ARGS: --disable-rofiles-fuse
+        run: packaging/flatpak/build-flatpak.sh
+
+      - name: Attach it to the release
+        run: gh release upload "$TAG" --clobber dist/simple-cuts-*.flatpak
+
+  macos:
+    needs: publish
+    uses: ./.github/workflows/macos-dmg.yml
+    with:
+      tag: ${{ github.ref_name }}
