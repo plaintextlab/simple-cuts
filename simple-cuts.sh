@@ -18,7 +18,7 @@
 set -eu
 
 APP="simple-cuts"
-VERSION="0.3.1"
+VERSION="0.3.2"
 # Set by --install (and by the in-app updater) in the installed copy of this script.
 INSTALLED_APP_DIR=""
 

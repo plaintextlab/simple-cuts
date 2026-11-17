@@ -1,5 +1,5 @@
 Name:           simple-cuts
-Version:        %{?app_version}%{!?app_version:0.3.1}
+Version:        %{?app_version}%{!?app_version:0.3.2}
 Release:        1%{?dist}
 Summary:        Simple video cutter for camera footage
 License:        MIT
@@ -40,6 +40,9 @@ frame-accurate re-encoding (NVIDIA NVENC or CPU).
 %{_datadir}/metainfo/io.github.simplecuts.SimpleCuts.metainfo.xml
 
 %changelog
+* Tue Nov 17 2026 Bitangsha Ray <plaintextlab@gmail.com> - 0.3.2-1
+- macOS app (.dmg); VideoToolbox GPU encoding and Cmd shortcuts on macOS
+
 * Sat Nov 14 2026 Bitangsha Ray <plaintextlab@gmail.com> - 0.3.1-1
 - Lossless joins merge overlapping keyframe-snapped segments; warn about sparse keyframes
 
