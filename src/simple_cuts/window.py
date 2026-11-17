@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -22,11 +23,17 @@ from .media import Clip, MediaError, format_time, keyframe_times, probe  # noqa:
 from .player import Player  # noqa: E402
 from .timeline import Timeline  # noqa: E402
 
+IS_MAC = sys.platform == "darwin"
+CTRL = "⌘" if IS_MAC else "Ctrl+"       # primary shortcut modifier, for labels
+# On macOS the Command key (META) takes the role of Ctrl.
+PRIMARY_MASK = Gdk.ModifierType.META_MASK if IS_MAC else Gdk.ModifierType.CONTROL_MASK
+
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".mkv", ".mts", ".m2ts", ".ts", ".mxf", ".avi",
               ".webm", ".3gp", ".insv", ".lrv"}
 
 HELP_TEXT = ("Space play/pause · J/K/L back/pause/forward · ←/→ frame · Shift+←/→ 1 s · "
-             "I in · O out · Esc clear in · Del delete segment · PgUp/PgDn clip · Ctrl+E export all · Ctrl+Shift+E export current")
+             "I in · O out · Esc clear in · Del delete segment · PgUp/PgDn clip · "
+             f"{CTRL}E export all · {CTRL}Shift+E export current")
 
 MODES = [(Mode.LOSSLESS, "Lossless (fast, starts on keyframe)"),
          (Mode.ACCURATE, "Frame-accurate (re-encode)")]
@@ -142,7 +149,7 @@ class MainWindow(Gtk.ApplicationWindow):
     # ---- construction ----------------------------------------------------
     def _build_ui(self) -> None:
         header = Gtk.HeaderBar()
-        header.pack_start(_button("Open files…", self.open_files, "Ctrl+O"))
+        header.pack_start(_button("Open files…", self.open_files, f"{CTRL}O"))
         header.pack_start(_button("Open folder…", self.open_folder, "Open every video in a "
                                   "folder (e.g. a camera card)"))
         header.pack_start(_button("Remove clip", self.remove_clip))
@@ -286,7 +293,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self.audio_check.set_active(bool(self.prefs.get("remove_audio", True)))
         self.join_check = Gtk.CheckButton(label="Join segments per clip")
         self.join_check.set_active(bool(self.prefs.get("join", False)))
-        self.gpu_check = Gtk.CheckButton(label="Use GPU (NVENC)")
+        self.gpu_check = Gtk.CheckButton(
+            label="Use GPU (VideoToolbox)" if IS_MAC else "Use GPU (NVENC)")
         self.gpu_check.set_active(bool(self.prefs.get("gpu", True)))
         for c in (self.audio_check, self.join_check, self.gpu_check):
             c.set_focus_on_click(False)
@@ -312,8 +320,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self.cancel_btn = _button("Cancel", self.cancel_export)
         self.cancel_btn.set_sensitive(False)
         self.export_current_btn = _button("Export current", self.export_current,
-                                          "Export only the clip in the timeline (Ctrl+Shift+E)")
-        self.export_btn = _button("Export all", self.export, "Export every clip (Ctrl+E)")
+                                          f"Export only the clip in the timeline ({CTRL}Shift+E)")
+        self.export_btn = _button("Export all", self.export, f"Export every clip ({CTRL}E)")
         self.export_btn.add_css_class("suggested-action")
         row2 = Gtk.Box(spacing=8)
         row2.append(self.progress)
@@ -1088,7 +1096,9 @@ class MainWindow(Gtk.ApplicationWindow):
                    "system": "Update it with your package manager, or install the new "
                              "package from the release page.",
                    "portable": "Download the new simple-cuts.sh from the release page, or "
-                               "run it with --install to get automatic updates."}[kind]
+                               "run it with --install to get automatic updates.",
+                   "macapp": "Download the new .dmg from the release page and drag "
+                             "Simple Cuts into Applications."}[kind]
             self.update_label.set_text(f"Simple Cuts {release.version} is available "
                                        f"(you have {__version__}). {how}")
             self.update_btn.set_label("Download")
@@ -1100,7 +1110,10 @@ class MainWindow(Gtk.ApplicationWindow):
         self._open_uri(url)
 
     def _open_uri(self, url: str) -> None:
-        if hasattr(Gtk, "UriLauncher"):
+        if IS_MAC:
+            subprocess.Popen(["open", url], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif hasattr(Gtk, "UriLauncher"):
             Gtk.UriLauncher.new(url).launch(self, None, None)
         else:
             Gtk.show_uri(self, url, Gdk.CURRENT_TIME)
@@ -1180,7 +1193,7 @@ class MainWindow(Gtk.ApplicationWindow):
         about.set_authors(["Bitangsha Ray"])
         kind = {"user": "installed for this user (updates automatically)",
                 "flatpak": "Flatpak", "dev": "git checkout", "system": "system package",
-                "portable": "single-file script"}[updater.install_kind()]
+                "portable": "single-file script", "macapp": "macOS app"}[updater.install_kind()]
         about.set_system_information(f"Install type: {kind}")
         about.present()
 
@@ -1189,10 +1202,9 @@ class MainWindow(Gtk.ApplicationWindow):
         focus = self.get_focus()
         if focus is not None and focus.get_ancestor(Gtk.Popover) is not None:
             return False   # navigating a drop-down / popover
-        if isinstance(focus, (Gtk.Text, Gtk.Editable)) and not (
-                state & Gdk.ModifierType.CONTROL_MASK):
+        if isinstance(focus, (Gtk.Text, Gtk.Editable)) and not (state & PRIMARY_MASK):
             return False   # typing in the output path
-        ctrl = bool(state & Gdk.ModifierType.CONTROL_MASK)
+        ctrl = bool(state & PRIMARY_MASK)
         shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
         k = Gdk.keyval_to_lower(keyval)
         K = Gdk

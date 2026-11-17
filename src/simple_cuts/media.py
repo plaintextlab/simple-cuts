@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import bisect
 import json
+import os
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
@@ -17,6 +19,10 @@ class MediaError(Exception):
 
 def find_tool(name: str) -> str:
     path = shutil.which(name)
+    if not path and sys.platform == "darwin":
+        # Apps started from Finder get a minimal PATH without Homebrew/MacPorts.
+        extra = os.pathsep.join(("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"))
+        path = shutil.which(name, path=extra)
     if not path:
         raise MediaError(f"'{name}' was not found on PATH. Install ffmpeg first.")
     return path

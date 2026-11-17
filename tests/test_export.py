@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -93,8 +94,9 @@ def test_keep_audio(clip, tmp_path):
 
 @pytest.mark.parametrize("gpu", [False, True])
 def test_accurate_is_frame_exact(clip, tmp_path, gpu):
-    if gpu and not encoder_available("h264_nvenc"):
-        pytest.skip("NVENC not available")
+    gpu_enc = "h264_videotoolbox" if sys.platform == "darwin" else "h264_nvenc"
+    if gpu and not encoder_available(gpu_enc):
+        pytest.skip(f"{gpu_enc} not available")
     clip.add_segment(2.5, 5.0)
     [out] = run(clip, tmp_path, mode=Mode.ACCURATE, use_gpu=gpu)
     assert abs(video_frames(out) - 75) <= 1

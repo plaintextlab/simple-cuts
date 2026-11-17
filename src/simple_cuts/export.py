@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from enum import Enum
@@ -98,10 +99,19 @@ def video_codec_args(info: MediaInfo, use_gpu: bool, gpu_compatible: bool = Fals
     """High-quality intermediate encode; 10-bit sources stay 10-bit (HEVC).
 
     ``gpu_compatible`` makes the CPU encoder produce the same codec/pixel format
-    NVENC would (4:2:0), so CPU-fallback parts can still be joined with GPU parts.
+    NVENC / VideoToolbox would (4:2:0), so CPU-fallback parts can still be joined with GPU parts.
     """
     ten_bit = info.is_10bit
-    if use_gpu:
+    if use_gpu and sys.platform == "darwin":
+        # Apple VideoToolbox. Constant-quality (-q:v) needs Apple Silicon; on Intel Macs
+        # the encode fails and the exporter falls back to the CPU.
+        enc = "hevc_videotoolbox" if ten_bit else "h264_videotoolbox"
+        if encoder_available(enc):
+            args = ["-c:v", enc, "-q:v", "80", "-allow_sw", "0"]
+            args += ["-pix_fmt", "p010le", "-profile:v", "main10"] if ten_bit \
+                else ["-pix_fmt", "yuv420p", "-profile:v", "high"]
+            return args
+    elif use_gpu:
         enc = "hevc_nvenc" if ten_bit else "h264_nvenc"
         if encoder_available(enc):
             args = ["-c:v", enc, "-preset", "p5", "-tune", "hq",

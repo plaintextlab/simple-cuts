@@ -146,6 +146,9 @@ def test_install_kind(home, tmp_path):
     assert updater.install_kind(app) == "user"
     assert updater.install_kind(ROOT / "src" / "simple_cuts") == "dev"
     assert updater.install_kind(tmp_path / "usr/lib/simple-cuts/simple_cuts") == "system"
+    mac = tmp_path / "Applications/Simple Cuts.app/Contents/Resources/lib/simple_cuts"
+    assert updater.install_kind(mac) == "macapp"
+    assert not updater.can_self_update("macapp")
 
 
 def install_current(home) -> Path:

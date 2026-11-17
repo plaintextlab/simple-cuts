@@ -6,13 +6,16 @@ This module adds two things that plain GTK4 misses on many desktops:
 * the freedesktop *color-scheme* preference (portal ``org.freedesktop.appearance``),
   followed live, so switching the desktop between dark and light switches the app;
 * a fallback to ``~/.config/gtk-3.0/settings.ini`` when the theme was only configured
-  for GTK3 (common with lxappearance / nwg-look on i3, sway, Openbox, ...).
+  for GTK3 (common with lxappearance / nwg-look on i3, sway, Openbox, ...);
+* on macOS, the system Light/Dark appearance (GTK's macOS backend ignores it).
 """
 
 from __future__ import annotations
 
 import configparser
 import os
+import plistlib
+import sys
 from pathlib import Path
 
 import gi
@@ -51,9 +54,37 @@ class ThemeFollower:
         self._proxy: Gio.DBusProxy | None = None
         if self.settings is None:
             return
+        if sys.platform == "darwin":
+            self._follow_macos()
+            return
         if "GTK_THEME" not in os.environ:
             self._apply_gtk3_fallback()
         self._connect_portal()
+
+    # ---- macOS appearance --------------------------------------------------
+    _MAC_PREFS = Path.home() / "Library" / "Preferences" / ".GlobalPreferences.plist"
+
+    def _follow_macos(self) -> None:
+        self._mac_mtime = None
+        self._poll_macos()
+        GLib.timeout_add_seconds(2, self._poll_macos)
+
+    def _poll_macos(self) -> bool:
+        """System Settings writes AppleInterfaceStyle=Dark to the global preferences
+        (absent in light mode); re-read it whenever that file changes."""
+        try:
+            mtime = self._MAC_PREFS.stat().st_mtime
+        except OSError:
+            return True
+        if mtime != self._mac_mtime:
+            self._mac_mtime = mtime
+            try:
+                with open(self._MAC_PREFS, "rb") as f:
+                    style = plistlib.load(f).get("AppleInterfaceStyle")
+            except (OSError, plistlib.InvalidFileException, ValueError):
+                return True
+            self._set_dark(style == "Dark")
+        return True
 
     def _apply_gtk3_fallback(self) -> None:
         gtk4 = _read_ini(_config_home() / "gtk-4.0" / "settings.ini")

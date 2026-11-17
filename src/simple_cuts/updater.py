@@ -74,10 +74,13 @@ def launcher_path() -> Path:
 
 def install_kind(package_dir: Path | None = None) -> str:
     """'user' (self-updating), 'flatpak', 'dev' (git checkout), 'portable'
-    (single-file script) or 'system' (distro package)."""
+    (single-file script), 'macapp' (macOS .app bundle) or 'system' (distro package)."""
     pkg = (package_dir or Path(__file__).parent).resolve()
     if Path("/.flatpak-info").exists():
         return "flatpak"
+    parts = pkg.parts
+    if any(a.endswith(".app") and b == "Contents" for a, b in zip(parts, parts[1:])):
+        return "macapp"
     try:
         if pkg.parent == user_app_dir().resolve():
             return "user"
